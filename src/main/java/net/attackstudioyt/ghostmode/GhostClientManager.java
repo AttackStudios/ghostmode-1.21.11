@@ -7,15 +7,32 @@ import java.util.UUID;
 
 public class GhostClientManager {
     private static final Set<UUID> ghosts = Collections.synchronizedSet(new HashSet<>());
+    /** Ghosts in this set are visible to other players (translucent). */
+    private static final Set<UUID> visibleGhosts = Collections.synchronizedSet(new HashSet<>());
     private static boolean localPlayerIsGhost = false;
 
     public static void setGhost(UUID uuid, boolean isGhost) {
-        if (isGhost) ghosts.add(uuid);
-        else ghosts.remove(uuid);
+        if (isGhost) {
+            ghosts.add(uuid);
+            visibleGhosts.add(uuid); // default visible until told otherwise
+        } else {
+            ghosts.remove(uuid);
+            visibleGhosts.remove(uuid);
+        }
+    }
+
+    public static void setVisibility(UUID uuid, boolean visibleToOthers) {
+        if (visibleToOthers) visibleGhosts.add(uuid);
+        else visibleGhosts.remove(uuid);
     }
 
     public static boolean isGhost(UUID uuid) {
         return ghosts.contains(uuid);
+    }
+
+    /** True if this ghost is visible (translucent) to other players. */
+    public static boolean isGhostVisible(UUID uuid) {
+        return visibleGhosts.contains(uuid);
     }
 
     public static void setLocalGhost(boolean ghost) {
@@ -28,6 +45,7 @@ public class GhostClientManager {
 
     public static void clear() {
         ghosts.clear();
+        visibleGhosts.clear();
         localPlayerIsGhost = false;
     }
 }

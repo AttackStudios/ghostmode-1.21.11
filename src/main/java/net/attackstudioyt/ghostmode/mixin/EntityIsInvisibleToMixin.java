@@ -11,19 +11,23 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Makes ghost players always visible to all observers (rendered at ~15% alpha
- * by vanilla's invisible-entity path, giving a ghostly appearance).
+ * Controls ghost player visibility to other players.
+ * - Visible mode (default): returns false ("not invisible") so the entity renders at ~15% alpha
+ *   via vanilla's translucent invisible-entity path.
+ * - Hidden mode: lets INVISIBILITY take full effect → completely unseen by others.
  */
 @Environment(EnvType.CLIENT)
 @Mixin(Entity.class)
 public class EntityIsInvisibleToMixin {
     @Inject(method = "isInvisibleTo", at = @At("HEAD"), cancellable = true)
-    private void ghostAlwaysVisible(PlayerEntity observer, CallbackInfoReturnable<Boolean> cir) {
+    private void ghostVisibility(PlayerEntity observer, CallbackInfoReturnable<Boolean> cir) {
         Entity self = (Entity) (Object) this;
         if (self instanceof PlayerEntity ghost && GhostClientManager.isGhost(ghost.getUuid())) {
-            // Return false = "not invisible to this observer"
-            // Entity still has INVISIBILITY so renderer uses translucent path (~15% alpha)
-            cir.setReturnValue(false);
+            if (GhostClientManager.isGhostVisible(ghost.getUuid())) {
+                // Visible to others: override invisibility → renders translucent (~15% alpha)
+                cir.setReturnValue(false);
+            }
+            // Hidden: don't override → INVISIBILITY makes them completely invisible
         }
     }
 }

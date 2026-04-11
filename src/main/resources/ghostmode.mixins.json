@@ -5,6 +5,7 @@
   "mixins": [
     "ItemEntityMixin",
     "LivingEntityDamageMixin",
+    "MobEntityMixin",
     "ServerPlayNetworkHandlerMixin"
   ],
   "client": [

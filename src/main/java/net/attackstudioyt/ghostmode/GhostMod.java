@@ -1,6 +1,7 @@
 package net.attackstudioyt.ghostmode;
 
 import net.attackstudioyt.ghostmode.network.GhostStatePayload;
+import net.attackstudioyt.ghostmode.network.GhostVisibilityPayload;
 import net.attackstudioyt.ghostmode.network.RespawnPayload;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -13,12 +14,14 @@ import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.entity.ExperienceOrbEntity;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
+import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.rule.GameRules;
 import org.slf4j.Logger;
@@ -31,6 +34,7 @@ public class GhostMod implements ModInitializer {
     @Override
     public void onInitialize() {
         PayloadTypeRegistry.playS2C().register(GhostStatePayload.ID, GhostStatePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(GhostVisibilityPayload.ID, GhostVisibilityPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(RespawnPayload.ID, RespawnPayload.CODEC);
 
         // On death → become a ghost instead
@@ -50,11 +54,12 @@ public class GhostMod implements ModInitializer {
             }
         });
 
-        // Send existing ghost states to newly joined players
+        // Send existing ghost/visibility states to newly joined players
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             ServerPlayerEntity newPlayer = handler.getPlayer();
             for (java.util.UUID uuid : GhostManager.getAllGhosts()) {
                 ServerPlayNetworking.send(newPlayer, new GhostStatePayload(uuid, true));
+                ServerPlayNetworking.send(newPlayer, new GhostVisibilityPayload(uuid, GhostManager.isVisibleToOthers(uuid)));
             }
         });
 
@@ -98,20 +103,20 @@ public class GhostMod implements ModInitializer {
             return ActionResult.PASS;
         });
 
-        // /ghostmode [player] — OP toggle for debugging
+        // /ghostmode — OP commands
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(CommandManager.literal("ghostmode")
                 .requires(CommandManager.requirePermissionLevel(CommandManager.ADMINS_CHECK))
                 // /ghostmode — toggle self
                 .executes(ctx -> {
                     ServerPlayerEntity player = ctx.getSource().getPlayerOrThrow();
-                    return toggleGhost(player, ctx.getSource().getServer().getPlayerManager());
+                    return toggleGhost(player);
                 })
                 // /ghostmode <player> — toggle another player
                 .then(CommandManager.argument("player", EntityArgumentType.player())
                     .executes(ctx -> {
                         ServerPlayerEntity target = EntityArgumentType.getPlayer(ctx, "player");
-                        int result = toggleGhost(target, ctx.getSource().getServer().getPlayerManager());
+                        int result = toggleGhost(target);
                         ctx.getSource().sendFeedback(() -> Text.literal(
                             (GhostManager.isGhost(target.getUuid()) ? "§7" : "§a") +
                             target.getName().getString() +
@@ -119,18 +124,43 @@ public class GhostMod implements ModInitializer {
                         return result;
                     })
                 )
+                // /ghostmode visible — toggle own visibility
+                .then(CommandManager.literal("visible")
+                    .executes(ctx -> {
+                        ServerPlayerEntity player = ctx.getSource().getPlayerOrThrow();
+                        return toggleVisibility(player, ctx);
+                    })
+                    .then(CommandManager.argument("player", EntityArgumentType.player())
+                        .executes(ctx -> {
+                            ServerPlayerEntity target = EntityArgumentType.getPlayer(ctx, "player");
+                            return toggleVisibility(target, ctx);
+                        })
+                    )
+                )
             );
         });
 
         LOGGER.info("Ghost Mode initialised.");
     }
 
-    private static int toggleGhost(ServerPlayerEntity player, net.minecraft.server.PlayerManager pm) {
+    private static int toggleGhost(ServerPlayerEntity player) {
         if (GhostManager.isGhost(player.getUuid())) {
             exitGhostState(player);
         } else {
             enterGhostState(player, null);
         }
+        return 1;
+    }
+
+    private static int toggleVisibility(ServerPlayerEntity target, com.mojang.brigadier.context.CommandContext<net.minecraft.server.command.ServerCommandSource> ctx) {
+        if (!GhostManager.isGhost(target.getUuid())) {
+            ctx.getSource().sendFeedback(() -> Text.literal("§c" + target.getName().getString() + " is not a ghost."), false);
+            return 0;
+        }
+        ServerWorld world = (ServerWorld) target.getEntityWorld();
+        boolean nowVisible = GhostManager.toggleVisibility(world.getServer(), target.getUuid());
+        ctx.getSource().sendFeedback(() -> Text.literal(
+            target.getName().getString() + " is now " + (nowVisible ? "§avisible§r (translucent)" : "§7invisible§r to others.")), true);
         return 1;
     }
 
@@ -166,6 +196,12 @@ public class GhostMod implements ModInitializer {
         // INVISIBILITY → renders at ~15% opacity for all players (ghost look)
         player.addStatusEffect(new StatusEffectInstance(
                 StatusEffects.INVISIBILITY, Integer.MAX_VALUE, 0, false, false, false));
+
+        // Clear mob targets within 64 blocks so they immediately stop pursuing
+        Box searchBox = player.getBoundingBox().expand(64);
+        serverWorld.getEntitiesByClass(MobEntity.class, searchBox,
+                mob -> mob.getTarget() != null && mob.getTarget().getUuid().equals(player.getUuid()))
+                .forEach(mob -> mob.setTarget(null));
 
         // Register ghost — broadcasts to all clients
         GhostManager.addGhost(serverWorld.getServer(), player.getUuid());
