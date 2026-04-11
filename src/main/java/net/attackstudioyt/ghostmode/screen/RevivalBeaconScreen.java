@@ -72,7 +72,7 @@ public class RevivalBeaconScreen extends Screen {
 
     @Override
     public void render(DrawContext ctx, int mouseX, int mouseY, float tickDelta) {
-        renderBackground(ctx, mouseX, mouseY, tickDelta);
+        renderInGameBackground(ctx);
 
         int ph = panelH();
         int px = width / 2 - PANEL_W / 2;
