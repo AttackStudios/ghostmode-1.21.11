@@ -2,9 +2,11 @@ package net.attackstudioyt.ghostmode;
 
 import net.attackstudioyt.astudiolib.command.StudioCommand;
 import net.attackstudioyt.astudiolib.hud.Toast;
+import net.attackstudioyt.ghostmode.item.RevivalBeaconItem;
 import net.attackstudioyt.ghostmode.network.GhostStatePayload;
 import net.attackstudioyt.ghostmode.network.GhostVisibilityPayload;
 import net.attackstudioyt.ghostmode.network.RespawnPayload;
+import net.attackstudioyt.ghostmode.screen.RevivalBeaconScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -13,11 +15,13 @@ import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.option.KeyBinding.Category;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
+import net.minecraft.util.ActionResult;
 import org.lwjgl.glfw.GLFW;
 
 @Environment(EnvType.CLIENT)
@@ -99,6 +103,19 @@ public class GhostClient implements ClientModInitializer {
                 "\n§8Use §f/ghostmode visible§8 to toggle."
             ));
             return 1;
+        });
+
+        // Revival Beacon: open screen on right-click (client-side)
+        UseItemCallback.EVENT.register((player, world, hand) -> {
+            if (world.isClient() && player.getStackInHand(hand).isOf(GhostMod.REVIVAL_BEACON)) {
+                MinecraftClient client = MinecraftClient.getInstance();
+                if (client.currentScreen == null) {
+                    RevivalBeaconItem.activated = true;
+                    client.setScreen(new RevivalBeaconScreen());
+                }
+                return ActionResult.SUCCESS;
+            }
+            return ActionResult.PASS;
         });
 
         // HUD: ghost mode text overlay

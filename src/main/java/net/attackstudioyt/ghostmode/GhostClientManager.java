@@ -43,6 +43,10 @@ public class GhostClientManager {
         return localPlayerIsGhost;
     }
 
+    public static Set<UUID> getAllGhosts() {
+        return Collections.unmodifiableSet(ghosts);
+    }
+
     public static void clear() {
         ghosts.clear();
         visibleGhosts.clear();

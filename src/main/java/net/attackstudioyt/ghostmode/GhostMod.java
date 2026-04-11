@@ -1,8 +1,10 @@
 package net.attackstudioyt.ghostmode;
 
+import net.attackstudioyt.ghostmode.item.RevivalBeaconItem;
 import net.attackstudioyt.ghostmode.network.GhostStatePayload;
 import net.attackstudioyt.ghostmode.network.GhostVisibilityPayload;
 import net.attackstudioyt.ghostmode.network.RespawnPayload;
+import net.attackstudioyt.ghostmode.network.RevivePlayerPayload;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
@@ -12,6 +14,10 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.entity.ExperienceOrbEntity;
+import net.minecraft.item.Item;
+import net.minecraft.registry.Registries;
+import net.minecraft.registry.Registry;
+import net.minecraft.util.Identifier;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.mob.MobEntity;
@@ -31,11 +37,24 @@ public class GhostMod implements ModInitializer {
     public static final String MOD_ID = "ghostmode";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
+    public static final RevivalBeaconItem REVIVAL_BEACON = Registry.register(
+            Registries.ITEM, Identifier.of(MOD_ID, "revival_beacon"),
+            new RevivalBeaconItem(new Item.Settings().maxCount(1)));
+
     @Override
     public void onInitialize() {
         PayloadTypeRegistry.playS2C().register(GhostStatePayload.ID, GhostStatePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(GhostVisibilityPayload.ID, GhostVisibilityPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(RespawnPayload.ID, RespawnPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(RevivePlayerPayload.ID, RevivePlayerPayload.CODEC);
+
+        // Revive a ghost player via Revival Beacon
+        ServerPlayNetworking.registerGlobalReceiver(RevivePlayerPayload.ID, (payload, context) -> {
+            ServerPlayerEntity target = context.server().getPlayerManager().getPlayer(payload.targetUuid());
+            if (target != null && GhostManager.isGhost(target.getUuid())) {
+                exitGhostState(target);
+            }
+        });
 
         // On death → become a ghost instead
         ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
