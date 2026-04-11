@@ -1,0 +1,145 @@
+package net.attackstudioyt.ghostmode;
+
+import net.attackstudioyt.ghostmode.network.GhostStatePayload;
+import net.attackstudioyt.ghostmode.network.RespawnPayload;
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.event.player.*;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.entity.ExperienceOrbEntity;
+import net.minecraft.entity.effect.StatusEffectInstance;
+import net.minecraft.entity.effect.StatusEffects;
+import net.minecraft.item.ItemStack;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.ActionResult;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.rule.GameRules;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class GhostMod implements ModInitializer {
+    public static final String MOD_ID = "ghostmode";
+    public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+
+    @Override
+    public void onInitialize() {
+        PayloadTypeRegistry.playS2C().register(GhostStatePayload.ID, GhostStatePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(RespawnPayload.ID, RespawnPayload.CODEC);
+
+        // On death → become a ghost instead
+        ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
+            if (entity instanceof ServerPlayerEntity player && !GhostManager.isGhost(player.getUuid())) {
+                enterGhostState(player, source);
+                return false;
+            }
+            return true;
+        });
+
+        // Client pressed R → respawn
+        ServerPlayNetworking.registerGlobalReceiver(RespawnPayload.ID, (payload, context) -> {
+            ServerPlayerEntity player = context.player();
+            if (GhostManager.isGhost(player.getUuid())) {
+                exitGhostState(player);
+            }
+        });
+
+        // Send existing ghost states to newly joined players
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            ServerPlayerEntity newPlayer = handler.getPlayer();
+            for (java.util.UUID uuid : GhostManager.getAllGhosts()) {
+                ServerPlayNetworking.send(newPlayer, new GhostStatePayload(uuid, true));
+            }
+        });
+
+        // Clean up on disconnect
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            java.util.UUID uuid = handler.getPlayer().getUuid();
+            if (GhostManager.isGhost(uuid)) {
+                GhostManager.removeLocal(uuid);
+                GhostStatePayload payload = new GhostStatePayload(uuid, false);
+                for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                    ServerPlayNetworking.send(p, payload);
+                }
+            }
+        });
+
+        // Block breaking
+        PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) ->
+                !GhostManager.isGhost(player.getUuid()));
+
+        // Right-click block
+        UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
+            if (GhostManager.isGhost(player.getUuid())) return ActionResult.FAIL;
+            return ActionResult.PASS;
+        });
+
+        // Use item in hand
+        UseItemCallback.EVENT.register((player, world, hand) -> {
+            if (GhostManager.isGhost(player.getUuid())) return ActionResult.FAIL;
+            return ActionResult.PASS;
+        });
+
+        // Punch entity
+        AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
+            if (GhostManager.isGhost(player.getUuid())) return ActionResult.FAIL;
+            return ActionResult.PASS;
+        });
+
+        // Punch / start mining block
+        AttackBlockCallback.EVENT.register((player, world, hand, pos, direction) -> {
+            if (GhostManager.isGhost(player.getUuid())) return ActionResult.FAIL;
+            return ActionResult.PASS;
+        });
+
+        LOGGER.info("Ghost Mode initialised.");
+    }
+
+    private static void enterGhostState(ServerPlayerEntity player, net.minecraft.entity.damage.DamageSource source) {
+        ServerWorld serverWorld = (ServerWorld) player.getEntityWorld();
+
+        // Drop inventory items with random trajectories (like vanilla death)
+        var inv = player.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (!stack.isEmpty()) {
+                player.dropItem(stack, true, false);
+                inv.setStack(i, ItemStack.EMPTY);
+            }
+        }
+
+        // Drop XP (unless keepInventory — which covers XP too in vanilla)
+        if (!serverWorld.getGameRules().getValue(GameRules.KEEP_INVENTORY)) {
+            int xp = player.totalExperience;
+            if (xp > 0) {
+                ExperienceOrbEntity.spawn(serverWorld, new Vec3d(player.getX(), player.getY(), player.getZ()), xp);
+            }
+            player.totalExperience = 0;
+            player.experienceLevel = 0;
+            player.experienceProgress = 0.0f;
+        }
+
+        // Restore health and hunger so they function while a ghost
+        player.setHealth(20.0f);
+        player.getHungerManager().setFoodLevel(20);
+        player.getHungerManager().setSaturationLevel(5.0f);
+
+        // INVISIBILITY → renders at ~15% opacity for all players (ghost look)
+        player.addStatusEffect(new StatusEffectInstance(
+                StatusEffects.INVISIBILITY, Integer.MAX_VALUE, 0, false, false, false));
+
+        // Register ghost — broadcasts to all clients
+        GhostManager.addGhost(serverWorld.getServer(), player.getUuid());
+    }
+
+    public static void exitGhostState(ServerPlayerEntity player) {
+        ServerWorld serverWorld = (ServerWorld) player.getEntityWorld();
+        GhostManager.removeGhost(serverWorld.getServer(), player.getUuid());
+        player.removeStatusEffect(StatusEffects.INVISIBILITY);
+        player.setHealth(player.getMaxHealth());
+        player.getHungerManager().setFoodLevel(20);
+        player.getHungerManager().setSaturationLevel(5.0f);
+    }
+}
