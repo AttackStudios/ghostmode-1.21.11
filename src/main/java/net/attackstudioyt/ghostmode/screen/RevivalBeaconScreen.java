@@ -72,7 +72,7 @@ public class RevivalBeaconScreen extends Screen {
 
     @Override
     public void render(DrawContext ctx, int mouseX, int mouseY, float tickDelta) {
-        // Dark screen overlay — manual, avoids renderInGameBackground deferred-draw issues
+        // Dark screen overlay — manual fill to avoid blur/deferred-draw issues
         ctx.fill(0, 0, width, height, 0x88000000);
 
         int ph = panelH();
@@ -86,18 +86,20 @@ public class RevivalBeaconScreen extends Screen {
         ctx.fill(px,               py,          px + 1,       py + ph, 0xFF8888FF);
         ctx.fill(px + PANEL_W - 1, py,          px + PANEL_W, py + ph, 0xFF8888FF);
 
-        // Draw buttons + other widgets first so text lands on top
-        super.render(ctx, mouseX, mouseY, tickDelta);
-
-        // Title text (drawn after super so it's never obscured by widgets)
+        // Title + divider — drawn before super.render() so the batch is still open
         ctx.drawCenteredTextWithShadow(textRenderer,
-                Text.literal("§b§lRevival Beacon"), width / 2, py + 9, 0xFFFFFF);
+                Text.literal("Revival Beacon").copy().styled(s -> s.withColor(0x55FFFF).withBold(true)),
+                width / 2, py + 9, 0xFFFFFF);
         ctx.fill(px + PADDING, py + TITLE_H - 1, px + PANEL_W - PADDING, py + TITLE_H, 0x558888FF);
 
         if (ghosts.isEmpty()) {
             ctx.drawCenteredTextWithShadow(textRenderer,
-                    Text.literal("§7No ghosts to revive"), width / 2, py + TITLE_H + 10, 0xAAAAAA);
+                    Text.literal("No ghosts to revive").copy().styled(s -> s.withColor(0xAAAAAA)),
+                    width / 2, py + TITLE_H + 10, 0xAAAAAA);
         }
+
+        // Buttons
+        super.render(ctx, mouseX, mouseY, tickDelta);
     }
 
     private void revive(UUID uuid) {
