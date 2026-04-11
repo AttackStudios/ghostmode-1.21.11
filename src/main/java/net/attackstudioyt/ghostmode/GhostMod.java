@@ -17,6 +17,8 @@ import net.minecraft.entity.ExperienceOrbEntity;
 import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.util.Identifier;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
@@ -37,9 +39,12 @@ public class GhostMod implements ModInitializer {
     public static final String MOD_ID = "ghostmode";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
+    private static final RegistryKey<Item> REVIVAL_BEACON_KEY =
+            RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "revival_beacon"));
+
     public static final RevivalBeaconItem REVIVAL_BEACON = Registry.register(
-            Registries.ITEM, Identifier.of(MOD_ID, "revival_beacon"),
-            new RevivalBeaconItem(new Item.Settings().maxCount(1)));
+            Registries.ITEM, REVIVAL_BEACON_KEY,
+            new RevivalBeaconItem(new Item.Settings().maxCount(1).registryKey(REVIVAL_BEACON_KEY)));
 
     @Override
     public void onInitialize() {
