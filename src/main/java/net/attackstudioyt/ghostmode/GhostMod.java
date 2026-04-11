@@ -3,17 +3,21 @@ package net.attackstudioyt.ghostmode;
 import net.attackstudioyt.ghostmode.network.GhostStatePayload;
 import net.attackstudioyt.ghostmode.network.RespawnPayload;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.*;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.entity.ExperienceOrbEntity;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.item.ItemStack;
+import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.rule.GameRules;
@@ -94,7 +98,40 @@ public class GhostMod implements ModInitializer {
             return ActionResult.PASS;
         });
 
+        // /ghostmode [player] — OP toggle for debugging
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+            dispatcher.register(CommandManager.literal("ghostmode")
+                .requires(CommandManager.requirePermissionLevel(CommandManager.ADMINS_CHECK))
+                // /ghostmode — toggle self
+                .executes(ctx -> {
+                    ServerPlayerEntity player = ctx.getSource().getPlayerOrThrow();
+                    return toggleGhost(player, ctx.getSource().getServer().getPlayerManager());
+                })
+                // /ghostmode <player> — toggle another player
+                .then(CommandManager.argument("player", EntityArgumentType.player())
+                    .executes(ctx -> {
+                        ServerPlayerEntity target = EntityArgumentType.getPlayer(ctx, "player");
+                        int result = toggleGhost(target, ctx.getSource().getServer().getPlayerManager());
+                        ctx.getSource().sendFeedback(() -> Text.literal(
+                            (GhostManager.isGhost(target.getUuid()) ? "§7" : "§a") +
+                            target.getName().getString() +
+                            (GhostManager.isGhost(target.getUuid()) ? " is now a ghost." : " is no longer a ghost.")), true);
+                        return result;
+                    })
+                )
+            );
+        });
+
         LOGGER.info("Ghost Mode initialised.");
+    }
+
+    private static int toggleGhost(ServerPlayerEntity player, net.minecraft.server.PlayerManager pm) {
+        if (GhostManager.isGhost(player.getUuid())) {
+            exitGhostState(player);
+        } else {
+            enterGhostState(player, null);
+        }
+        return 1;
     }
 
     private static void enterGhostState(ServerPlayerEntity player, net.minecraft.entity.damage.DamageSource source) {
