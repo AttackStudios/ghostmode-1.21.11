@@ -3,6 +3,7 @@
   "package": "net.attackstudioyt.ghostmode.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "ExperienceOrbMixin",
     "ItemEntityMixin",
     "LivingEntityDamageMixin",
     "MobEntityMixin",
