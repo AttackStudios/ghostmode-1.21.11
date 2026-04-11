@@ -54,12 +54,20 @@ public class GhostMod implements ModInitializer {
             }
         });
 
-        // Send existing ghost/visibility states to newly joined players
+        // Send existing ghost/visibility states to newly joined players; restore if they relogged as ghost
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             ServerPlayerEntity newPlayer = handler.getPlayer();
-            for (java.util.UUID uuid : GhostManager.getAllGhosts()) {
-                ServerPlayNetworking.send(newPlayer, new GhostStatePayload(uuid, true));
-                ServerPlayNetworking.send(newPlayer, new GhostVisibilityPayload(uuid, GhostManager.isVisibleToOthers(uuid)));
+            java.util.UUID uuid = newPlayer.getUuid();
+
+            // Restore ghost state if player was a ghost before relog/restart
+            if (GhostPersistence.contains(uuid) && !GhostManager.isGhost(uuid)) {
+                restoreGhostState(newPlayer, server);
+            }
+
+            // Sync all current ghost states to this joining player
+            for (java.util.UUID ghostUuid : GhostManager.getAllGhosts()) {
+                ServerPlayNetworking.send(newPlayer, new GhostStatePayload(ghostUuid, true));
+                ServerPlayNetworking.send(newPlayer, new GhostVisibilityPayload(ghostUuid, GhostManager.isVisibleToOthers(ghostUuid)));
             }
         });
 
@@ -143,6 +151,17 @@ public class GhostMod implements ModInitializer {
         LOGGER.info("Ghost Mode initialised.");
     }
 
+    /** Restore ghost state for a player who relogged while a ghost (no item/XP drop). */
+    private static void restoreGhostState(ServerPlayerEntity player, net.minecraft.server.MinecraftServer server) {
+        player.setHealth(20.0f);
+        player.getHungerManager().setFoodLevel(20);
+        player.getHungerManager().setSaturationLevel(5.0f);
+        player.addStatusEffect(new StatusEffectInstance(
+                StatusEffects.INVISIBILITY, Integer.MAX_VALUE, 0, false, false, false));
+        GhostManager.addGhost(server, player.getUuid());
+        LOGGER.info("[GhostMode] Restored ghost state for {}", player.getName().getString());
+    }
+
     private static int toggleGhost(ServerPlayerEntity player) {
         if (GhostManager.isGhost(player.getUuid())) {
             exitGhostState(player);
@@ -203,12 +222,16 @@ public class GhostMod implements ModInitializer {
                 mob -> mob.getTarget() != null && mob.getTarget().getUuid().equals(player.getUuid()))
                 .forEach(mob -> mob.setTarget(null));
 
+        // Persist ghost state so it survives relogs/restarts
+        GhostPersistence.add(player.getUuid());
+
         // Register ghost — broadcasts to all clients
         GhostManager.addGhost(serverWorld.getServer(), player.getUuid());
     }
 
     public static void exitGhostState(ServerPlayerEntity player) {
         ServerWorld serverWorld = (ServerWorld) player.getEntityWorld();
+        GhostPersistence.remove(player.getUuid()); // remove before broadcast so clients get clean state
         GhostManager.removeGhost(serverWorld.getServer(), player.getUuid());
         player.removeStatusEffect(StatusEffects.INVISIBILITY);
         player.setHealth(player.getMaxHealth());
