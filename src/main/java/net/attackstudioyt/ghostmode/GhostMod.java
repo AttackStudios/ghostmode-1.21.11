@@ -36,6 +36,7 @@ import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.rule.GameRules;
@@ -87,9 +88,14 @@ public class GhostMod implements ModInitializer {
             }
         });
 
-        // On death → become a ghost instead. Also play the kill sound to nearby players.
+        // On death → become a ghost instead. Broadcast a red death message and play the
+        // kill sound to nearby players. Vanilla suppresses its own death message because
+        // we cancel the death (return false), so we send our own.
         ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
             if (entity instanceof ServerPlayerEntity player && !GhostManager.isGhost(player.getUuid())) {
+                Text msg = Text.literal(player.getName().getString() + " has been killed!")
+                        .styled(s -> s.withColor(Formatting.RED));
+                ((ServerWorld) player.getEntityWorld()).getServer().getPlayerManager().broadcast(msg, false);
                 playKillSoundNearby(player);
                 enterGhostState(player, source);
                 return false;

@@ -10,24 +10,16 @@ import net.attackstudioyt.ghostmode.screen.RevivalBeaconScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.option.KeyBinding.Category;
-import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
-import org.lwjgl.glfw.GLFW;
 
 @Environment(EnvType.CLIENT)
 public class GhostClient implements ClientModInitializer {
-
-    private static KeyBinding respawnKey;
 
     @Override
     public void onInitializeClient() {
@@ -39,7 +31,7 @@ public class GhostClient implements ClientModInitializer {
                 boolean wasGhost = GhostClientManager.isLocalPlayerGhost();
                 GhostClientManager.setLocalGhost(payload.isGhost());
                 if (!wasGhost && payload.isGhost()) {
-                    Toast.show("§7Ghost Mode", "You are now a ghost. Press §fR§7 to respawn.");
+                    Toast.show("§7Ghost Mode", "You are now a ghost.");
                 } else if (wasGhost && !payload.isGhost()) {
                     Toast.show("§aRespawned", "You have returned to life.");
                 }
@@ -62,21 +54,6 @@ public class GhostClient implements ClientModInitializer {
         // Clear ghost state on disconnect
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) ->
                 GhostClientManager.clear());
-
-        // Respawn keybind: R
-        respawnKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.ghostmode.respawn",
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_R,
-                Category.MISC
-        ));
-
-        // Send respawn request when key pressed in ghost state
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (respawnKey.wasPressed() && GhostClientManager.isLocalPlayerGhost()) {
-                ClientPlayNetworking.send(new RespawnPayload());
-            }
-        });
 
         // /studiolib ghostmode toggle — force-exit ghost mode
         StudioCommand.register("ghostmode", "toggle", "Force-exit ghost mode (debug)", ctx -> {
@@ -131,8 +108,6 @@ public class GhostClient implements ClientModInitializer {
 
             drawContext.drawCenteredTextWithShadow(client.textRenderer,
                     Text.literal("§7GHOST MODE"), centerX, y, 0xFFAAAAAA);
-            drawContext.drawCenteredTextWithShadow(client.textRenderer,
-                    Text.literal("§8Press §f[R]§8 to respawn"), centerX, y + 11, 0xFF888888);
         });
     }
 }
