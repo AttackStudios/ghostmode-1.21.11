@@ -77,6 +77,9 @@ public class GhostMod implements ModInitializer {
                 spawnReviveParticles(target);
                 exitGhostState(target);
                 consumeBeacon(context.player());
+                Text msg = Text.literal(target.getName().getString() + " has been revived!")
+                        .styled(s -> s.withColor(Formatting.GREEN));
+                context.server().getPlayerManager().broadcast(msg, false);
             }
         });
 

@@ -12,6 +12,7 @@
   ],
   "client": [
     "EntityIsInvisibleToMixin",
+    "EntityRendererLabelMixin",
     "EntitySprintParticlesMixin",
     "InGameHudHealthMixin",
     "MinecraftClientMixin"
