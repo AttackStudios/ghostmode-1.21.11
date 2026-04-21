@@ -30,10 +30,15 @@ public class GhostManager {
     }
 
     public static void addGhost(MinecraftServer server, UUID uuid) {
+        addGhost(server, uuid, DeathForm.TRANSPARENT);
+    }
+
+    public static void addGhost(MinecraftServer server, UUID uuid, DeathForm form) {
         ghosts.add(uuid);
-        visibleGhosts.add(uuid); // visible by default
+        boolean visible = form == DeathForm.TRANSPARENT;
+        if (visible) visibleGhosts.add(uuid); else visibleGhosts.remove(uuid);
         broadcastState(server, uuid, true);
-        broadcastVisibility(server, uuid, true);
+        broadcastVisibility(server, uuid, visible);
     }
 
     public static void removeGhost(MinecraftServer server, UUID uuid) {
@@ -44,16 +49,15 @@ public class GhostManager {
 
     /** Toggle visibility for a ghost. Returns the new visibility state. */
     public static boolean toggleVisibility(MinecraftServer server, UUID uuid) {
-        boolean nowVisible;
-        if (visibleGhosts.contains(uuid)) {
-            visibleGhosts.remove(uuid);
-            nowVisible = false;
-        } else {
-            visibleGhosts.add(uuid);
-            nowVisible = true;
-        }
-        broadcastVisibility(server, uuid, nowVisible);
+        boolean nowVisible = !visibleGhosts.contains(uuid);
+        setVisibility(server, uuid, nowVisible);
         return nowVisible;
+    }
+
+    /** Set visibility for a ghost explicitly. Broadcasts to all players. */
+    public static void setVisibility(MinecraftServer server, UUID uuid, boolean visible) {
+        if (visible) visibleGhosts.add(uuid); else visibleGhosts.remove(uuid);
+        broadcastVisibility(server, uuid, visible);
     }
 
     /** Remove without broadcasting (e.g. on disconnect). */

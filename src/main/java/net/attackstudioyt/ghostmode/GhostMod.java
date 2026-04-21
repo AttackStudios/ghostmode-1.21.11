@@ -140,7 +140,8 @@ public class GhostMod implements ModInitializer {
             return ActionResult.PASS;
         });
 
-        // /ghostmode — OP commands
+        // /ghostmode — OP commands. The .requires(ADMINS_CHECK) on the root literal gates
+        // every nested subcommand below, so /ghostmode mode and /ghostmode default are OP-only too.
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(CommandManager.literal("ghostmode")
                 .requires(CommandManager.requirePermissionLevel(CommandManager.ADMINS_CHECK))
@@ -174,6 +175,29 @@ public class GhostMod implements ModInitializer {
                         })
                     )
                 )
+                // /ghostmode mode <transparent|invisible> [player] — set per-player death-form preference
+                .then(CommandManager.literal("mode")
+                    .then(CommandManager.argument("form", com.mojang.brigadier.arguments.StringArgumentType.word())
+                        .suggests((c, b) -> { b.suggest("transparent"); b.suggest("invisible"); return b.buildFuture(); })
+                        .executes(ctx -> {
+                            ServerPlayerEntity player = ctx.getSource().getPlayerOrThrow();
+                            return setMode(player, com.mojang.brigadier.arguments.StringArgumentType.getString(ctx, "form"), ctx);
+                        })
+                        .then(CommandManager.argument("player", EntityArgumentType.player())
+                            .executes(ctx -> {
+                                ServerPlayerEntity target = EntityArgumentType.getPlayer(ctx, "player");
+                                return setMode(target, com.mojang.brigadier.arguments.StringArgumentType.getString(ctx, "form"), ctx);
+                            })
+                        )
+                    )
+                )
+                // /ghostmode default <transparent|invisible> — set server-wide default death form
+                .then(CommandManager.literal("default")
+                    .then(CommandManager.argument("form", com.mojang.brigadier.arguments.StringArgumentType.word())
+                        .suggests((c, b) -> { b.suggest("transparent"); b.suggest("invisible"); return b.buildFuture(); })
+                        .executes(ctx -> setDefault(com.mojang.brigadier.arguments.StringArgumentType.getString(ctx, "form"), ctx))
+                    )
+                )
             );
         });
 
@@ -190,7 +214,7 @@ public class GhostMod implements ModInitializer {
         player.extinguish();
         player.addStatusEffect(new StatusEffectInstance(
                 StatusEffects.INVISIBILITY, Integer.MAX_VALUE, 0, false, false, false));
-        GhostManager.addGhost(server, player.getUuid());
+        GhostManager.addGhost(server, player.getUuid(), GhostConfig.get().getFormFor(player.getUuid()));
         LOGGER.info("[GhostMode] Restored ghost state for {}", player.getName().getString());
     }
 
@@ -200,6 +224,37 @@ public class GhostMod implements ModInitializer {
         } else {
             enterGhostState(player, null);
         }
+        return 1;
+    }
+
+    private static int setMode(ServerPlayerEntity target, String formArg,
+                               com.mojang.brigadier.context.CommandContext<net.minecraft.server.command.ServerCommandSource> ctx) {
+        DeathForm form = DeathForm.parse(formArg);
+        if (form == null) {
+            ctx.getSource().sendFeedback(() -> Text.literal("§cUnknown form '" + formArg + "'. Use transparent or invisible."), false);
+            return 0;
+        }
+        GhostConfig.get().setFormFor(target.getUuid(), form);
+        // Q2: if target is currently a ghost, re-apply visibility instantly so the change is live.
+        if (GhostManager.isGhost(target.getUuid())) {
+            ServerWorld world = (ServerWorld) target.getEntityWorld();
+            GhostManager.setVisibility(world.getServer(), target.getUuid(), form == DeathForm.TRANSPARENT);
+        }
+        ctx.getSource().sendFeedback(() -> Text.literal(
+            target.getName().getString() + "'s death form is now §b" + form.name().toLowerCase() + "§r."), true);
+        return 1;
+    }
+
+    private static int setDefault(String formArg,
+                                  com.mojang.brigadier.context.CommandContext<net.minecraft.server.command.ServerCommandSource> ctx) {
+        DeathForm form = DeathForm.parse(formArg);
+        if (form == null) {
+            ctx.getSource().sendFeedback(() -> Text.literal("§cUnknown form '" + formArg + "'. Use transparent or invisible."), false);
+            return 0;
+        }
+        GhostConfig.get().setDefaultDeathForm(form);
+        ctx.getSource().sendFeedback(() -> Text.literal(
+            "§7Server-wide default death form set to §b" + form.name().toLowerCase() + "§r."), true);
         return 1;
     }
 
@@ -262,8 +317,10 @@ public class GhostMod implements ModInitializer {
         // Persist ghost state so it survives relogs/restarts
         GhostPersistence.add(player.getUuid());
 
-        // Register ghost — broadcasts to all clients
-        GhostManager.addGhost(serverWorld.getServer(), player.getUuid());
+        // Register ghost — broadcasts to all clients. Form respects per-player preference
+        // (set via /ghostmode mode), falling back to server-wide default in GhostConfig.
+        GhostManager.addGhost(serverWorld.getServer(), player.getUuid(),
+                GhostConfig.get().getFormFor(player.getUuid()));
     }
 
     public static void exitGhostState(ServerPlayerEntity player) {
