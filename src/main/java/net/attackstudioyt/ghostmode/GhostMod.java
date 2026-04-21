@@ -110,9 +110,18 @@ public class GhostMod implements ModInitializer {
             ServerPlayerEntity newPlayer = handler.getPlayer();
             java.util.UUID uuid = newPlayer.getUuid();
 
-            // Restore ghost state if player was a ghost before relog/restart
             if (GhostPersistence.contains(uuid) && !GhostManager.isGhost(uuid)) {
+                // Restore ghost state if player was a ghost before relog/restart
                 restoreGhostState(newPlayer, server);
+            } else if (!GhostPersistence.contains(uuid)) {
+                // Defensive: strip any leftover ghost-style INVISIBILITY (very-long duration)
+                // that vanilla restored from NBT but our persistence no longer recognises.
+                // Without this, exiting ghost state right before disconnecting could leave a
+                // stale infinite-INVIS in the player's save file.
+                StatusEffectInstance existing = newPlayer.getStatusEffect(StatusEffects.INVISIBILITY);
+                if (existing != null && (existing.isInfinite() || existing.getDuration() >= 1_000_000)) {
+                    newPlayer.removeStatusEffect(StatusEffects.INVISIBILITY);
+                }
             }
 
             // Sync all current ghost states to this joining player
@@ -256,6 +265,10 @@ public class GhostMod implements ModInitializer {
         player.setStuckArrowCount(0);
         player.setStingerCount(0);
         player.extinguish();
+        // Strip vanilla-restored INVISIBILITY first so the re-applied instance has guaranteed
+        // showParticles=false / showIcon=false flags — NBT round-trip can drop them otherwise,
+        // leaving the ∞-duration icon visible in the HUD after relog.
+        player.removeStatusEffect(StatusEffects.INVISIBILITY);
         player.addStatusEffect(new StatusEffectInstance(
                 StatusEffects.INVISIBILITY, Integer.MAX_VALUE, 0, false, false, false));
         GhostManager.addGhost(server, player.getUuid(), GhostConfig.get().getFormFor(player.getUuid()));
