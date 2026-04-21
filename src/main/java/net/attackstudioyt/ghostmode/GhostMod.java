@@ -117,9 +117,14 @@ public class GhostMod implements ModInitializer {
             return ActionResult.PASS;
         });
 
-        // Use item in hand
+        // Use item in hand — ghosts can't use items, EXCEPT the Revival Beacon
+        // (beacon opens a client-side screen; without this exemption the client's
+        // UseItemCallback in GhostClient never runs because FAIL short-circuits the event).
         UseItemCallback.EVENT.register((player, world, hand) -> {
-            if (GhostManager.isGhost(player.getUuid())) return ActionResult.FAIL;
+            if (GhostManager.isGhost(player.getUuid())) {
+                if (player.getStackInHand(hand).isOf(REVIVAL_BEACON)) return ActionResult.PASS;
+                return ActionResult.FAIL;
+            }
             return ActionResult.PASS;
         });
 
@@ -180,6 +185,9 @@ public class GhostMod implements ModInitializer {
         player.setHealth(20.0f);
         player.getHungerManager().setFoodLevel(20);
         player.getHungerManager().setSaturationLevel(5.0f);
+        player.setStuckArrowCount(0);
+        player.setStingerCount(0);
+        player.extinguish();
         player.addStatusEffect(new StatusEffectInstance(
                 StatusEffects.INVISIBILITY, Integer.MAX_VALUE, 0, false, false, false));
         GhostManager.addGhost(server, player.getUuid());
@@ -235,6 +243,11 @@ public class GhostMod implements ModInitializer {
         player.setHealth(20.0f);
         player.getHungerManager().setFoodLevel(20);
         player.getHungerManager().setSaturationLevel(5.0f);
+
+        // Clear arrows/stingers stuck in the body — ghost died, no more projectiles showing
+        player.setStuckArrowCount(0);
+        player.setStingerCount(0);
+        player.extinguish();
 
         // INVISIBILITY → renders at ~15% opacity for all players (ghost look)
         player.addStatusEffect(new StatusEffectInstance(

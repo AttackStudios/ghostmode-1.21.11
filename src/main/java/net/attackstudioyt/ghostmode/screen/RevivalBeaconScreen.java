@@ -71,35 +71,37 @@ public class RevivalBeaconScreen extends Screen {
     }
 
     @Override
-    public void render(DrawContext ctx, int mouseX, int mouseY, float tickDelta) {
-        // Dark screen overlay — manual fill to avoid blur/deferred-draw issues
-        ctx.fill(0, 0, width, height, 0x88000000);
+    public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float tickDelta) {
+        super.renderBackground(ctx, mouseX, mouseY, tickDelta);
 
         int ph = panelH();
         int px = width / 2 - PANEL_W / 2;
         int py = height / 2 - ph / 2;
 
-        // Panel background + border
         ctx.fill(px, py, px + PANEL_W, py + ph, 0xF0101018);
         ctx.fill(px,               py,          px + PANEL_W, py + 1,  0xFF8888FF);
         ctx.fill(px,               py + ph - 1, px + PANEL_W, py + ph, 0xFF8888FF);
         ctx.fill(px,               py,          px + 1,       py + ph, 0xFF8888FF);
         ctx.fill(px + PANEL_W - 1, py,          px + PANEL_W, py + ph, 0xFF8888FF);
-
-        // Title + divider — drawn before super.render() so the batch is still open
-        ctx.drawCenteredTextWithShadow(textRenderer,
-                Text.literal("Revival Beacon").copy().styled(s -> s.withColor(0x55FFFF).withBold(true)),
-                width / 2, py + 9, 0xFFFFFF);
         ctx.fill(px + PADDING, py + TITLE_H - 1, px + PANEL_W - PADDING, py + TITLE_H, 0x558888FF);
+    }
+
+    @Override
+    public void render(DrawContext ctx, int mouseX, int mouseY, float tickDelta) {
+        super.render(ctx, mouseX, mouseY, tickDelta);
+
+        int ph = panelH();
+        int py = height / 2 - ph / 2;
+
+        ctx.drawCenteredTextWithShadow(textRenderer,
+                Text.literal("Revival Beacon"),
+                width / 2, py + 9, 0xFF55FFFF);
 
         if (ghosts.isEmpty()) {
             ctx.drawCenteredTextWithShadow(textRenderer,
-                    Text.literal("No ghosts to revive").copy().styled(s -> s.withColor(0xAAAAAA)),
-                    width / 2, py + TITLE_H + 10, 0xAAAAAA);
+                    Text.literal("No ghosts to revive"),
+                    width / 2, py + TITLE_H + 10, 0xFFAAAAAA);
         }
-
-        // Buttons
-        super.render(ctx, mouseX, mouseY, tickDelta);
     }
 
     private void revive(UUID uuid) {

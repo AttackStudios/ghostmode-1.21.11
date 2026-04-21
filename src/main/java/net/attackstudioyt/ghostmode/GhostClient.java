@@ -130,9 +130,9 @@ public class GhostClient implements ClientModInitializer {
             int y = screenH / 2 + 30;
 
             drawContext.drawCenteredTextWithShadow(client.textRenderer,
-                    Text.literal("§7GHOST MODE"), centerX, y, 0xAAAAAA);
+                    Text.literal("§7GHOST MODE"), centerX, y, 0xFFAAAAAA);
             drawContext.drawCenteredTextWithShadow(client.textRenderer,
-                    Text.literal("§8Press §f[R]§8 to respawn"), centerX, y + 11, 0x888888);
+                    Text.literal("§8Press §f[R]§8 to respawn"), centerX, y + 11, 0xFF888888);
         });
     }
 }
