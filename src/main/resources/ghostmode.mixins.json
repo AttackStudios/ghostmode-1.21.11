@@ -12,6 +12,7 @@
   "client": [
     "EntityIsInvisibleToMixin",
     "EntitySprintParticlesMixin",
+    "InGameHudHealthMixin",
     "MinecraftClientMixin"
   ],
   "injectors": {
