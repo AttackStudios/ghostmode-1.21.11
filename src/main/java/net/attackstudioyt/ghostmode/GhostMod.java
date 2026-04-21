@@ -24,10 +24,15 @@ import net.minecraft.util.Identifier;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.network.packet.s2c.play.PlaySoundS2CPacket;
+import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvent;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.math.Box;
@@ -46,6 +51,15 @@ public class GhostMod implements ModInitializer {
     public static final RevivalBeaconItem REVIVAL_BEACON = Registry.register(
             Registries.ITEM, REVIVAL_BEACON_KEY,
             new RevivalBeaconItem(new Item.Settings().maxCount(1).registryKey(REVIVAL_BEACON_KEY)));
+
+    /** Played to all players within 240 blocks when a player dies. */
+    public static final Identifier PLAYER_KILL_ID = Identifier.of(MOD_ID, "player_kill");
+    public static final SoundEvent PLAYER_KILL_SOUND = Registry.register(
+            Registries.SOUND_EVENT, PLAYER_KILL_ID, SoundEvent.of(PLAYER_KILL_ID));
+    private static final RegistryEntry<SoundEvent> PLAYER_KILL_SOUND_ENTRY =
+            Registries.SOUND_EVENT.getEntry(PLAYER_KILL_SOUND);
+
+    private static final double KILL_SOUND_RADIUS = 240.0;
 
     @Override
     public void onInitialize() {
@@ -76,9 +90,10 @@ public class GhostMod implements ModInitializer {
             }
         });
 
-        // On death → become a ghost instead
+        // On death → become a ghost instead. Also play the kill sound to nearby players.
         ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
             if (entity instanceof ServerPlayerEntity player && !GhostManager.isGhost(player.getUuid())) {
+                playKillSoundNearby(player);
                 enterGhostState(player, source);
                 return false;
             }
@@ -217,6 +232,23 @@ public class GhostMod implements ModInitializer {
         });
 
         LOGGER.info("Ghost Mode initialised.");
+    }
+
+    /** Play the kill sound to every player within KILL_SOUND_RADIUS of the dying player. */
+    private static void playKillSoundNearby(ServerPlayerEntity dying) {
+        ServerWorld world = (ServerWorld) dying.getEntityWorld();
+        double r2 = KILL_SOUND_RADIUS * KILL_SOUND_RADIUS;
+        double x = dying.getX(), y = dying.getY(), z = dying.getZ();
+        long seed = world.getRandom().nextLong();
+        for (ServerPlayerEntity p : world.getPlayers()) {
+            if (p.squaredDistanceTo(x, y, z) <= r2) {
+                // Send the packet directly so the audible range is exactly KILL_SOUND_RADIUS,
+                // not the volume-attenuated range of World#playSound (≈16 * volume blocks).
+                p.networkHandler.sendPacket(new PlaySoundS2CPacket(
+                        PLAYER_KILL_SOUND_ENTRY, SoundCategory.HOSTILE,
+                        x, y, z, 1.0f, 1.0f, seed));
+            }
+        }
     }
 
     /** Restore ghost state for a player who relogged while a ghost (no item/XP drop). */
