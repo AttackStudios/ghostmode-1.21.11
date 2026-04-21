@@ -1,8 +1,0 @@
-{
-  "player_kill": {
-    "category": "hostile",
-    "sounds": [
-      { "name": "ghostmode:player_kill", "stream": false }
-    ]
-  }
-}
