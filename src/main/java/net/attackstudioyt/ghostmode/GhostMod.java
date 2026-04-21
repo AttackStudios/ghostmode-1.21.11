@@ -30,6 +30,7 @@ import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.network.packet.s2c.play.PlaySoundS2CPacket;
+import net.minecraft.particle.DustParticleEffect;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvent;
@@ -70,7 +71,9 @@ public class GhostMod implements ModInitializer {
         ServerPlayNetworking.registerGlobalReceiver(RevivePlayerPayload.ID, (payload, context) -> {
             ServerPlayerEntity target = context.server().getPlayerManager().getPlayer(payload.targetUuid());
             if (target != null && GhostManager.isGhost(target.getUuid())) {
+                spawnReviveParticles(target);
                 exitGhostState(target);
+                consumeBeacon(context.player());
             }
         });
 
@@ -260,6 +263,43 @@ public class GhostMod implements ModInitializer {
                         KILL_SOUND_ENTRY, SoundCategory.HOSTILE,
                         x, y, z, 1.0f, 1.0f, seed));
             }
+        }
+    }
+
+    /** Three rings of #5fcde4 dust around the revived player, puffed outward. */
+    private static void spawnReviveParticles(ServerPlayerEntity target) {
+        ServerWorld w = (ServerWorld) target.getEntityWorld();
+        DustParticleEffect dust = new DustParticleEffect(0x5FCDE4, 1.0f);
+        double cx = target.getX();
+        double cz = target.getZ();
+        double baseY = target.getY() + 0.1;
+        int rings = 3;
+        int particlesPerRing = 24;
+        for (int r = 0; r < rings; r++) {
+            double radius = 0.6 + r * 0.45;
+            double y = baseY + r * 0.7;
+            for (int i = 0; i < particlesPerRing; i++) {
+                double angle = 2.0 * Math.PI * i / particlesPerRing;
+                double dx = Math.cos(angle);
+                double dz = Math.sin(angle);
+                // count=0 makes (deltaX, deltaY, deltaZ) act as the velocity vector — gives the outward poof.
+                w.spawnParticles(dust, cx + dx * radius, y, cz + dz * radius,
+                        0, dx * 0.25, 0.1, dz * 0.25, 1.0);
+            }
+        }
+    }
+
+    /** Decrement one Revival Beacon from the user's hands (or anywhere in inventory as fallback). */
+    private static void consumeBeacon(ServerPlayerEntity user) {
+        if (user == null) return;
+        ItemStack main = user.getMainHandStack();
+        if (main.isOf(REVIVAL_BEACON)) { main.decrement(1); return; }
+        ItemStack off = user.getOffHandStack();
+        if (off.isOf(REVIVAL_BEACON)) { off.decrement(1); return; }
+        var inv = user.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack s = inv.getStack(i);
+            if (s.isOf(REVIVAL_BEACON)) { s.decrement(1); return; }
         }
     }
 
