@@ -9,6 +9,7 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.*;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -58,6 +59,20 @@ public class GhostMod implements ModInitializer {
             ServerPlayerEntity target = context.server().getPlayerManager().getPlayer(payload.targetUuid());
             if (target != null && GhostManager.isGhost(target.getUuid())) {
                 exitGhostState(target);
+            }
+        });
+
+        // Per-tick scrub: arrows, bee stingers and on-fire state can be applied AFTER
+        // enterGhostState (e.g. the arrow that triggered the death stickifies post-damage,
+        // and the LivingEntityDamageMixin cancel doesn't stop the projectile from sticking).
+        // Cheap to do — only iterates if any ghosts exist.
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            if (GhostManager.getAllGhosts().isEmpty()) return;
+            for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                if (!GhostManager.isGhost(p.getUuid())) continue;
+                if (p.getStuckArrowCount() != 0) p.setStuckArrowCount(0);
+                if (p.getStingerCount() != 0) p.setStingerCount(0);
+                if (p.isOnFire()) p.extinguish();
             }
         });
 
