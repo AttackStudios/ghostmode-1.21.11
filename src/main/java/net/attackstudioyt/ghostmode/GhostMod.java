@@ -425,6 +425,11 @@ public class GhostMod implements ModInitializer {
         player.setStingerCount(0);
         player.extinguish();
 
+        // Strip any status effects from the player's previous life — vanilla does this on
+        // real death, but we cancel death, so Speed/Strength/Poison/etc. would otherwise
+        // linger (and their particle swirls would visibly orbit the ghost).
+        player.clearStatusEffects();
+
         // INVISIBILITY → renders at ~15% opacity for all players (ghost look)
         player.addStatusEffect(new StatusEffectInstance(
                 StatusEffects.INVISIBILITY, Integer.MAX_VALUE, 0, false, false, false));
