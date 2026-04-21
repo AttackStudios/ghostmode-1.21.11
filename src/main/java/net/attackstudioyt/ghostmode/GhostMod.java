@@ -29,9 +29,12 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.network.packet.s2c.play.PlaySoundS2CPacket;
 import net.minecraft.particle.DustParticleEffect;
 import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.registry.tag.DamageTypeTags;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
@@ -94,8 +97,15 @@ public class GhostMod implements ModInitializer {
         // On death → become a ghost instead. Broadcast a red death message and play the
         // kill sound to nearby players. Vanilla suppresses its own death message because
         // we cancel the death (return false), so we send our own.
+        //
+        // Totem of Undying: Fabric fires ALLOW_DEATH via a @Redirect on isDead() that
+        // gates BOTH the totem check and onDeath. If we return false here, the totem
+        // path is skipped entirely. So when the player has a death-protector item in
+        // hand and the damage source doesn't bypass invulnerability, return true and
+        // let vanilla's tryUseDeathProtector save them — no ghost conversion.
         ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
             if (entity instanceof ServerPlayerEntity player && !GhostManager.isGhost(player.getUuid())) {
+                if (canTotemSave(player, source)) return true;
                 Text msg = Text.literal(player.getName().getString() + " has been killed!")
                         .styled(s -> s.withColor(Formatting.RED));
                 ((ServerWorld) player.getEntityWorld()).getServer().getPlayerManager().broadcast(msg, false);
@@ -264,6 +274,14 @@ public class GhostMod implements ModInitializer {
                         x, y, z, 1.0f, 1.0f, seed));
             }
         }
+    }
+
+    /** True when vanilla's tryUseDeathProtector would activate — i.e. a totem-of-undying-like
+     *  item is in either hand and the damage source doesn't bypass invulnerability. */
+    private static boolean canTotemSave(ServerPlayerEntity p, DamageSource source) {
+        if (source.isIn(DamageTypeTags.BYPASSES_INVULNERABILITY)) return false;
+        return p.getMainHandStack().get(DataComponentTypes.DEATH_PROTECTION) != null
+            || p.getOffHandStack().get(DataComponentTypes.DEATH_PROTECTION) != null;
     }
 
     /** Three rings of #5fcde4 dust around the revived player, puffed outward. */
