@@ -1,0 +1,464 @@
+package net.attackstudioyt.afterlight;
+
+import net.attackstudioyt.afterlight.item.RevivalBeaconItem;
+import net.attackstudioyt.afterlight.network.GhostStatePayload;
+import net.attackstudioyt.afterlight.network.GhostVisibilityPayload;
+import net.attackstudioyt.afterlight.network.RespawnPayload;
+import net.attackstudioyt.afterlight.network.RevivePlayerPayload;
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.event.player.*;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.command.argument.EntityArgumentType;
+import net.minecraft.entity.ExperienceOrbEntity;
+import net.minecraft.item.Item;
+import net.minecraft.registry.Registries;
+import net.minecraft.registry.Registry;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
+import net.minecraft.util.Identifier;
+import net.minecraft.entity.effect.StatusEffectInstance;
+import net.minecraft.entity.effect.StatusEffects;
+import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.ItemStack;
+import net.minecraft.server.command.CommandManager;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.entity.damage.DamageSource;
+import net.minecraft.network.packet.s2c.play.PlaySoundS2CPacket;
+import net.minecraft.particle.DustParticleEffect;
+import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.registry.tag.DamageTypeTags;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvent;
+import net.minecraft.sound.SoundEvents;
+import net.minecraft.text.Text;
+import net.minecraft.util.ActionResult;
+import net.minecraft.util.Formatting;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.rule.GameRules;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class AfterlightMod implements ModInitializer {
+    public static final String MOD_ID = "afterlight";
+    public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+
+    private static final RegistryKey<Item> REVIVAL_BEACON_KEY =
+            RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "revival_beacon"));
+
+    public static final RevivalBeaconItem REVIVAL_BEACON = Registry.register(
+            Registries.ITEM, REVIVAL_BEACON_KEY,
+            new RevivalBeaconItem(new Item.Settings().maxCount(1).registryKey(REVIVAL_BEACON_KEY)));
+
+    /** Radius (blocks) for the wither-spawn kill sound played to nearby players on a player death. */
+    private static final double KILL_SOUND_RADIUS = 240.0;
+    private static final RegistryEntry<SoundEvent> KILL_SOUND_ENTRY =
+            Registries.SOUND_EVENT.getEntry(SoundEvents.ENTITY_WITHER_SPAWN);
+
+    @Override
+    public void onInitialize() {
+        PayloadTypeRegistry.playS2C().register(GhostStatePayload.ID, GhostStatePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(GhostVisibilityPayload.ID, GhostVisibilityPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(RespawnPayload.ID, RespawnPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(RevivePlayerPayload.ID, RevivePlayerPayload.CODEC);
+
+        // Revive a ghost player via Revival Beacon
+        ServerPlayNetworking.registerGlobalReceiver(RevivePlayerPayload.ID, (payload, context) -> {
+            ServerPlayerEntity target = context.server().getPlayerManager().getPlayer(payload.targetUuid());
+            if (target != null && GhostManager.isGhost(target.getUuid())) {
+                spawnReviveParticles(target);
+                exitGhostState(target);
+                consumeBeacon(context.player());
+                Text msg = Text.literal(target.getName().getString() + " has been revived!")
+                        .styled(s -> s.withColor(Formatting.GREEN));
+                context.server().getPlayerManager().broadcast(msg, false);
+            }
+        });
+
+        // Per-tick scrub: arrows, bee stingers and on-fire state can be applied AFTER
+        // enterGhostState (e.g. the arrow that triggered the death stickifies post-damage,
+        // and the LivingEntityDamageMixin cancel doesn't stop the projectile from sticking).
+        // Cheap to do — only iterates if any ghosts exist.
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            if (GhostManager.getAllGhosts().isEmpty()) return;
+            for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                if (!GhostManager.isGhost(p.getUuid())) continue;
+                if (p.getStuckArrowCount() != 0) p.setStuckArrowCount(0);
+                if (p.getStingerCount() != 0) p.setStingerCount(0);
+                if (p.isOnFire()) p.extinguish();
+            }
+        });
+
+        // On death → become a ghost instead. Broadcast a red death message and play the
+        // kill sound to nearby players. Vanilla suppresses its own death message because
+        // we cancel the death (return false), so we send our own.
+        //
+        // Totem of Undying: Fabric fires ALLOW_DEATH via a @Redirect on isDead() that
+        // gates BOTH the totem check and onDeath. If we return false here, the totem
+        // path is skipped entirely. So when the player has a death-protector item in
+        // hand and the damage source doesn't bypass invulnerability, return true and
+        // let vanilla's tryUseDeathProtector save them — no ghost conversion.
+        ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
+            if (entity instanceof ServerPlayerEntity player && !GhostManager.isGhost(player.getUuid())) {
+                if (canTotemSave(player, source)) return true;
+                Text msg = Text.literal(player.getName().getString() + " has been killed!")
+                        .styled(s -> s.withColor(Formatting.RED));
+                ((ServerWorld) player.getEntityWorld()).getServer().getPlayerManager().broadcast(msg, false);
+                playKillSoundNearby(player);
+                enterGhostState(player, source);
+                return false;
+            }
+            return true;
+        });
+
+        // Client pressed R → respawn
+        ServerPlayNetworking.registerGlobalReceiver(RespawnPayload.ID, (payload, context) -> {
+            ServerPlayerEntity player = context.player();
+            if (GhostManager.isGhost(player.getUuid())) {
+                exitGhostState(player);
+            }
+        });
+
+        // Send existing ghost/visibility states to newly joined players; restore if they relogged as ghost
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            ServerPlayerEntity newPlayer = handler.getPlayer();
+            java.util.UUID uuid = newPlayer.getUuid();
+
+            if (AfterlightPersistence.contains(uuid) && !GhostManager.isGhost(uuid)) {
+                // Restore ghost state if player was a ghost before relog/restart
+                restoreGhostState(newPlayer, server);
+            } else if (!AfterlightPersistence.contains(uuid)) {
+                // Defensive: strip any leftover ghost-style INVISIBILITY (very-long duration)
+                // that vanilla restored from NBT but our persistence no longer recognises.
+                // Without this, exiting ghost state right before disconnecting could leave a
+                // stale infinite-INVIS in the player's save file.
+                StatusEffectInstance existing = newPlayer.getStatusEffect(StatusEffects.INVISIBILITY);
+                if (existing != null && (existing.isInfinite() || existing.getDuration() >= 1_000_000)) {
+                    newPlayer.removeStatusEffect(StatusEffects.INVISIBILITY);
+                }
+            }
+
+            // Sync all current ghost states to this joining player
+            for (java.util.UUID ghostUuid : GhostManager.getAllGhosts()) {
+                ServerPlayNetworking.send(newPlayer, new GhostStatePayload(ghostUuid, true));
+                ServerPlayNetworking.send(newPlayer, new GhostVisibilityPayload(ghostUuid, GhostManager.isVisibleToOthers(ghostUuid)));
+            }
+        });
+
+        // Clean up on disconnect
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            java.util.UUID uuid = handler.getPlayer().getUuid();
+            if (GhostManager.isGhost(uuid)) {
+                GhostManager.removeLocal(uuid);
+                GhostStatePayload payload = new GhostStatePayload(uuid, false);
+                for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                    ServerPlayNetworking.send(p, payload);
+                }
+            }
+        });
+
+        // Block breaking
+        PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) ->
+                !GhostManager.isGhost(player.getUuid()));
+
+        // Right-click block
+        UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
+            if (GhostManager.isGhost(player.getUuid())) return ActionResult.FAIL;
+            return ActionResult.PASS;
+        });
+
+        // Use item in hand — ghosts can't use items, EXCEPT the Revival Beacon
+        // (beacon opens a client-side screen; without this exemption the client's
+        // UseItemCallback in AfterlightClient never runs because FAIL short-circuits the event).
+        UseItemCallback.EVENT.register((player, world, hand) -> {
+            if (GhostManager.isGhost(player.getUuid())) {
+                if (player.getStackInHand(hand).isOf(REVIVAL_BEACON)) return ActionResult.PASS;
+                return ActionResult.FAIL;
+            }
+            return ActionResult.PASS;
+        });
+
+        // Punch entity
+        AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
+            if (GhostManager.isGhost(player.getUuid())) return ActionResult.FAIL;
+            return ActionResult.PASS;
+        });
+
+        // Punch / start mining block
+        AttackBlockCallback.EVENT.register((player, world, hand, pos, direction) -> {
+            if (GhostManager.isGhost(player.getUuid())) return ActionResult.FAIL;
+            return ActionResult.PASS;
+        });
+
+        // /afterlight — OP commands. The .requires(ADMINS_CHECK) on the root literal gates
+        // every nested subcommand below, so /afterlight mode and /afterlight default are OP-only too.
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+            dispatcher.register(CommandManager.literal("afterlight")
+                .requires(CommandManager.requirePermissionLevel(CommandManager.ADMINS_CHECK))
+                // /afterlight — toggle self
+                .executes(ctx -> {
+                    ServerPlayerEntity player = ctx.getSource().getPlayerOrThrow();
+                    return toggleGhost(player);
+                })
+                // /afterlight <player> — toggle another player
+                .then(CommandManager.argument("player", EntityArgumentType.player())
+                    .executes(ctx -> {
+                        ServerPlayerEntity target = EntityArgumentType.getPlayer(ctx, "player");
+                        int result = toggleGhost(target);
+                        ctx.getSource().sendFeedback(() -> Text.literal(
+                            (GhostManager.isGhost(target.getUuid()) ? "§7" : "§a") +
+                            target.getName().getString() +
+                            (GhostManager.isGhost(target.getUuid()) ? " is now a ghost." : " is no longer a ghost.")), true);
+                        return result;
+                    })
+                )
+                // /afterlight visible — toggle own visibility
+                .then(CommandManager.literal("visible")
+                    .executes(ctx -> {
+                        ServerPlayerEntity player = ctx.getSource().getPlayerOrThrow();
+                        return toggleVisibility(player, ctx);
+                    })
+                    .then(CommandManager.argument("player", EntityArgumentType.player())
+                        .executes(ctx -> {
+                            ServerPlayerEntity target = EntityArgumentType.getPlayer(ctx, "player");
+                            return toggleVisibility(target, ctx);
+                        })
+                    )
+                )
+                // /afterlight mode <transparent|invisible> [player] — set per-player death-form preference
+                .then(CommandManager.literal("mode")
+                    .then(CommandManager.argument("form", com.mojang.brigadier.arguments.StringArgumentType.word())
+                        .suggests((c, b) -> { b.suggest("transparent"); b.suggest("invisible"); return b.buildFuture(); })
+                        .executes(ctx -> {
+                            ServerPlayerEntity player = ctx.getSource().getPlayerOrThrow();
+                            return setMode(player, com.mojang.brigadier.arguments.StringArgumentType.getString(ctx, "form"), ctx);
+                        })
+                        .then(CommandManager.argument("player", EntityArgumentType.player())
+                            .executes(ctx -> {
+                                ServerPlayerEntity target = EntityArgumentType.getPlayer(ctx, "player");
+                                return setMode(target, com.mojang.brigadier.arguments.StringArgumentType.getString(ctx, "form"), ctx);
+                            })
+                        )
+                    )
+                )
+                // /afterlight default <transparent|invisible> — set server-wide default death form
+                .then(CommandManager.literal("default")
+                    .then(CommandManager.argument("form", com.mojang.brigadier.arguments.StringArgumentType.word())
+                        .suggests((c, b) -> { b.suggest("transparent"); b.suggest("invisible"); return b.buildFuture(); })
+                        .executes(ctx -> setDefault(com.mojang.brigadier.arguments.StringArgumentType.getString(ctx, "form"), ctx))
+                    )
+                )
+            );
+        });
+
+        LOGGER.info("Afterlight initialised.");
+    }
+
+    /** Play the wither-spawn kill sound to every player within KILL_SOUND_RADIUS of the dying player. */
+    private static void playKillSoundNearby(ServerPlayerEntity dying) {
+        ServerWorld world = (ServerWorld) dying.getEntityWorld();
+        double r2 = KILL_SOUND_RADIUS * KILL_SOUND_RADIUS;
+        double x = dying.getX(), y = dying.getY(), z = dying.getZ();
+        long seed = world.getRandom().nextLong();
+        for (ServerPlayerEntity p : world.getPlayers()) {
+            if (p.squaredDistanceTo(x, y, z) <= r2) {
+                // Send the packet directly so the audible range is exactly KILL_SOUND_RADIUS,
+                // not the volume-attenuated range of World#playSound (≈16 * volume blocks).
+                p.networkHandler.sendPacket(new PlaySoundS2CPacket(
+                        KILL_SOUND_ENTRY, SoundCategory.HOSTILE,
+                        x, y, z, 1.0f, 1.0f, seed));
+            }
+        }
+    }
+
+    /** True when vanilla's tryUseDeathProtector would activate — i.e. a totem-of-undying-like
+     *  item is in either hand and the damage source doesn't bypass invulnerability. */
+    private static boolean canTotemSave(ServerPlayerEntity p, DamageSource source) {
+        if (source.isIn(DamageTypeTags.BYPASSES_INVULNERABILITY)) return false;
+        return p.getMainHandStack().get(DataComponentTypes.DEATH_PROTECTION) != null
+            || p.getOffHandStack().get(DataComponentTypes.DEATH_PROTECTION) != null;
+    }
+
+    /** Three rings of #5fcde4 dust around the revived player, puffed outward. */
+    private static void spawnReviveParticles(ServerPlayerEntity target) {
+        ServerWorld w = (ServerWorld) target.getEntityWorld();
+        DustParticleEffect dust = new DustParticleEffect(0x5FCDE4, 1.0f);
+        double cx = target.getX();
+        double cz = target.getZ();
+        double baseY = target.getY() + 0.1;
+        int rings = 3;
+        int particlesPerRing = 24;
+        for (int r = 0; r < rings; r++) {
+            double radius = 0.6 + r * 0.45;
+            double y = baseY + r * 0.7;
+            for (int i = 0; i < particlesPerRing; i++) {
+                double angle = 2.0 * Math.PI * i / particlesPerRing;
+                double dx = Math.cos(angle);
+                double dz = Math.sin(angle);
+                // count=0 makes (deltaX, deltaY, deltaZ) act as the velocity vector — gives the outward poof.
+                w.spawnParticles(dust, cx + dx * radius, y, cz + dz * radius,
+                        0, dx * 0.25, 0.1, dz * 0.25, 1.0);
+            }
+        }
+    }
+
+    /** Decrement one Revival Beacon from the user's hands (or anywhere in inventory as fallback). */
+    private static void consumeBeacon(ServerPlayerEntity user) {
+        if (user == null) return;
+        ItemStack main = user.getMainHandStack();
+        if (main.isOf(REVIVAL_BEACON)) { main.decrement(1); return; }
+        ItemStack off = user.getOffHandStack();
+        if (off.isOf(REVIVAL_BEACON)) { off.decrement(1); return; }
+        var inv = user.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack s = inv.getStack(i);
+            if (s.isOf(REVIVAL_BEACON)) { s.decrement(1); return; }
+        }
+    }
+
+    /** Restore ghost state for a player who relogged while a ghost (no item/XP drop). */
+    private static void restoreGhostState(ServerPlayerEntity player, net.minecraft.server.MinecraftServer server) {
+        player.setHealth(20.0f);
+        player.getHungerManager().setFoodLevel(20);
+        player.getHungerManager().setSaturationLevel(5.0f);
+        player.setStuckArrowCount(0);
+        player.setStingerCount(0);
+        player.extinguish();
+        // Strip vanilla-restored INVISIBILITY first so the re-applied instance has guaranteed
+        // showParticles=false / showIcon=false flags — NBT round-trip can drop them otherwise,
+        // leaving the ∞-duration icon visible in the HUD after relog.
+        player.removeStatusEffect(StatusEffects.INVISIBILITY);
+        player.addStatusEffect(new StatusEffectInstance(
+                StatusEffects.INVISIBILITY, Integer.MAX_VALUE, 0, false, false, false));
+        GhostManager.addGhost(server, player.getUuid(), AfterlightConfig.get().getFormFor(player.getUuid()));
+        LOGGER.info("[Afterlight] Restored ghost state for {}", player.getName().getString());
+    }
+
+    private static int toggleGhost(ServerPlayerEntity player) {
+        if (GhostManager.isGhost(player.getUuid())) {
+            exitGhostState(player);
+        } else {
+            enterGhostState(player, null);
+        }
+        return 1;
+    }
+
+    private static int setMode(ServerPlayerEntity target, String formArg,
+                               com.mojang.brigadier.context.CommandContext<net.minecraft.server.command.ServerCommandSource> ctx) {
+        DeathForm form = DeathForm.parse(formArg);
+        if (form == null) {
+            ctx.getSource().sendFeedback(() -> Text.literal("§cUnknown form '" + formArg + "'. Use transparent or invisible."), false);
+            return 0;
+        }
+        AfterlightConfig.get().setFormFor(target.getUuid(), form);
+        // Q2: if target is currently a ghost, re-apply visibility instantly so the change is live.
+        if (GhostManager.isGhost(target.getUuid())) {
+            ServerWorld world = (ServerWorld) target.getEntityWorld();
+            GhostManager.setVisibility(world.getServer(), target.getUuid(), form == DeathForm.TRANSPARENT);
+        }
+        ctx.getSource().sendFeedback(() -> Text.literal(
+            target.getName().getString() + "'s death form is now §b" + form.name().toLowerCase() + "§r."), true);
+        return 1;
+    }
+
+    private static int setDefault(String formArg,
+                                  com.mojang.brigadier.context.CommandContext<net.minecraft.server.command.ServerCommandSource> ctx) {
+        DeathForm form = DeathForm.parse(formArg);
+        if (form == null) {
+            ctx.getSource().sendFeedback(() -> Text.literal("§cUnknown form '" + formArg + "'. Use transparent or invisible."), false);
+            return 0;
+        }
+        AfterlightConfig.get().setDefaultDeathForm(form);
+        ctx.getSource().sendFeedback(() -> Text.literal(
+            "§7Server-wide default death form set to §b" + form.name().toLowerCase() + "§r."), true);
+        return 1;
+    }
+
+    private static int toggleVisibility(ServerPlayerEntity target, com.mojang.brigadier.context.CommandContext<net.minecraft.server.command.ServerCommandSource> ctx) {
+        if (!GhostManager.isGhost(target.getUuid())) {
+            ctx.getSource().sendFeedback(() -> Text.literal("§c" + target.getName().getString() + " is not a ghost."), false);
+            return 0;
+        }
+        ServerWorld world = (ServerWorld) target.getEntityWorld();
+        boolean nowVisible = GhostManager.toggleVisibility(world.getServer(), target.getUuid());
+        ctx.getSource().sendFeedback(() -> Text.literal(
+            target.getName().getString() + " is now " + (nowVisible ? "§avisible§r (translucent)" : "§7invisible§r to others.")), true);
+        return 1;
+    }
+
+    private static void enterGhostState(ServerPlayerEntity player, net.minecraft.entity.damage.DamageSource source) {
+        ServerWorld serverWorld = (ServerWorld) player.getEntityWorld();
+
+        // Drop inventory items with random trajectories (like vanilla death)
+        var inv = player.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (!stack.isEmpty()) {
+                player.dropItem(stack, true, false);
+                inv.setStack(i, ItemStack.EMPTY);
+            }
+        }
+
+        // Drop XP (unless keepInventory — which covers XP too in vanilla)
+        if (!serverWorld.getGameRules().getValue(GameRules.KEEP_INVENTORY)) {
+            int xp = player.totalExperience;
+            if (xp > 0) {
+                ExperienceOrbEntity.spawn(serverWorld, new Vec3d(player.getX(), player.getY(), player.getZ()), xp);
+            }
+            player.totalExperience = 0;
+            player.experienceLevel = 0;
+            player.experienceProgress = 0.0f;
+        }
+
+        // Restore health and hunger so they function while a ghost
+        player.setHealth(20.0f);
+        player.getHungerManager().setFoodLevel(20);
+        player.getHungerManager().setSaturationLevel(5.0f);
+
+        // Clear arrows/stingers stuck in the body — ghost died, no more projectiles showing
+        player.setStuckArrowCount(0);
+        player.setStingerCount(0);
+        player.extinguish();
+
+        // Strip any status effects from the player's previous life — vanilla does this on
+        // real death, but we cancel death, so Speed/Strength/Poison/etc. would otherwise
+        // linger (and their particle swirls would visibly orbit the ghost).
+        player.clearStatusEffects();
+
+        // INVISIBILITY → renders at ~15% opacity for all players (ghost look)
+        player.addStatusEffect(new StatusEffectInstance(
+                StatusEffects.INVISIBILITY, Integer.MAX_VALUE, 0, false, false, false));
+
+        // Clear mob targets within 64 blocks so they immediately stop pursuing
+        Box searchBox = player.getBoundingBox().expand(64);
+        serverWorld.getEntitiesByClass(MobEntity.class, searchBox,
+                mob -> mob.getTarget() != null && mob.getTarget().getUuid().equals(player.getUuid()))
+                .forEach(mob -> mob.setTarget(null));
+
+        // Persist ghost state so it survives relogs/restarts
+        AfterlightPersistence.add(player.getUuid());
+
+        // Register ghost — broadcasts to all clients. Form respects per-player preference
+        // (set via /afterlight mode), falling back to server-wide default in AfterlightConfig.
+        GhostManager.addGhost(serverWorld.getServer(), player.getUuid(),
+                AfterlightConfig.get().getFormFor(player.getUuid()));
+    }
+
+    public static void exitGhostState(ServerPlayerEntity player) {
+        ServerWorld serverWorld = (ServerWorld) player.getEntityWorld();
+        AfterlightPersistence.remove(player.getUuid()); // remove before broadcast so clients get clean state
+        GhostManager.removeGhost(serverWorld.getServer(), player.getUuid());
+        player.removeStatusEffect(StatusEffects.INVISIBILITY);
+        player.setHealth(player.getMaxHealth());
+        player.getHungerManager().setFoodLevel(20);
+        player.getHungerManager().setSaturationLevel(5.0f);
+    }
+}

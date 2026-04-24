@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " D ",
+    "DWD",
+    " D "
+  ],
+  "key": {
+    "D": { "item": "minecraft:diamond" },
+    "W": { "item": "minecraft:nether_star" }
+  },
+  "result": {
+    "id": "afterlight:revival_beacon",
+    "count": 1
+  }
+}

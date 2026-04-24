@@ -1,8 +1,8 @@
-# Ghost Mode
+# Afterlight
 
 > **BETA — TESTING IN PROGRESS**
 >
-> Ghost Mode is in beta. Core features are complete and the mod is stable
+> Afterlight is in beta. Core features are complete and the mod is stable
 > enough for small-group multiplayer testing, but it has not yet had wide
 > exposure. Use backups on any world that matters and please report any
 > bugs you hit.
@@ -23,7 +23,7 @@ with a Revival Beacon.
     `[Ghost]` prefix above your name.
   - **Invisible** — fully hidden from other players.
 - **Server-wide default + per-player override.** Each player can pick
-  their preferred form via `/ghostmode mode <transparent|invisible>`,
+  their preferred form via `/afterlight mode <transparent|invisible>`,
   or fall back to whatever the server admin sets as the default.
 - **Revival Beacon** — a craftable item another player can use on you to
   bring you back to life. Single-use, consumed after a successful revive.
@@ -50,15 +50,15 @@ with a Revival Beacon.
 
 ## Commands
 
-All `/ghostmode` subcommands are OP-only.
+All `/afterlight` subcommands are OP-only.
 
 | Command | Effect |
 |---|---|
-| `/ghostmode` | Toggle yourself into / out of ghost mode |
-| `/ghostmode <player>` | Toggle another player |
-| `/ghostmode visible [player]` | Flip a current ghost between transparent and invisible |
-| `/ghostmode mode <transparent\|invisible> [player]` | Set a player's preferred death-form (persists) |
-| `/ghostmode default <transparent\|invisible>` | Set the server-wide default death-form |
+| `/afterlight` | Toggle yourself into / out of ghost mode |
+| `/afterlight <player>` | Toggle another player |
+| `/afterlight visible [player]` | Flip a current ghost between transparent and invisible |
+| `/afterlight mode <transparent\|invisible> [player]` | Set a player's preferred death-form (persists) |
+| `/afterlight default <transparent\|invisible>` | Set the server-wide default death-form |
 
 ---
 
@@ -81,7 +81,7 @@ All `/ghostmode` subcommands are OP-only.
 - Behavior with other mods that hook the death pipeline (alternative
   totems, custom respawn systems, gravestones, etc.) has not been
   validated and may conflict.
-- Save format for `ghostmode_config.json` and `ghostmode_ghosts.dat`
+- Save format for `afterlight_config.json` and `afterlight_ghosts.dat`
   may still change between beta builds.
 
 If you hit a bug or weird interaction, a short repro plus your

@@ -1,0 +1,23 @@
+{
+  "required": true,
+  "package": "net.attackstudioyt.afterlight.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "EntityPushMixin",
+    "ExperienceOrbMixin",
+    "ItemEntityMixin",
+    "LivingEntityDamageMixin",
+    "MobEntityMixin",
+    "ServerPlayNetworkHandlerMixin"
+  ],
+  "client": [
+    "EntityIsInvisibleToMixin",
+    "EntityRendererLabelMixin",
+    "EntitySprintParticlesMixin",
+    "InGameHudHealthMixin",
+    "MinecraftClientMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

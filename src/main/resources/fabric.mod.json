@@ -1,17 +1,17 @@
 {
 	"schemaVersion": 1,
-	"id": "ghostmode",
+	"id": "afterlight",
 	"version": "${version}",
-	"name": "Ghost Mode",
+	"name": "Afterlight",
 	"description": "On death, become a transparent ghost instead of the respawn screen.",
 	"authors": ["AttackStudio"],
 	"license": "CC0-1.0",
 	"environment": "*",
 	"entrypoints": {
-		"main": ["net.attackstudioyt.ghostmode.GhostMod"],
-		"client": ["net.attackstudioyt.ghostmode.GhostClient"]
+		"main": ["net.attackstudioyt.afterlight.AfterlightMod"],
+		"client": ["net.attackstudioyt.afterlight.AfterlightClient"]
 	},
-	"mixins": ["ghostmode.mixins.json"],
+	"mixins": ["afterlight.mixins.json"],
 	"depends": {
 		"fabricloader": ">=0.18.4",
 		"minecraft": "~1.21.11",

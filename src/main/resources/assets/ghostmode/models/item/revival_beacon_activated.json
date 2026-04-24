@@ -1,6 +1,0 @@
-{
-  "parent": "item/generated",
-  "textures": {
-    "layer0": "ghostmode:item/revival_beacon_activated"
-  }
-}
