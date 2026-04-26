@@ -76,8 +76,9 @@ All `/afterlight` subcommands are OP-only.
 
 - Tested primarily on macOS in dev environments and small multiplayer
   setups. Larger servers may surface issues we haven't seen.
-- The Revival Beacon currently has no recipe / loot drop wired up yet —
-  beacons need to be given via `/give` for testing.
+- The Revival Beacon is crafted from a Beacon (center), a Totem of
+  Undying (bottom centre), Ghast Tears in the corners, and Soul Lanterns
+  on the remaining sides. No loot drop is wired up — crafting only.
 - Behavior with other mods that hook the death pipeline (alternative
   totems, custom respawn systems, gravestones, etc.) has not been
   validated and may conflict.

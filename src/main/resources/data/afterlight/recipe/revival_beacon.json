@@ -1,13 +1,15 @@
 {
   "type": "minecraft:crafting_shaped",
   "pattern": [
-    " D ",
-    "DWD",
-    " D "
+    "GLG",
+    "LBL",
+    "GTG"
   ],
   "key": {
-    "D": { "item": "minecraft:diamond" },
-    "W": { "item": "minecraft:nether_star" }
+    "B": { "item": "minecraft:beacon" },
+    "T": { "item": "minecraft:totem_of_undying" },
+    "G": { "item": "minecraft:ghast_tear" },
+    "L": { "item": "minecraft:soul_lantern" }
   },
   "result": {
     "id": "afterlight:revival_beacon",
